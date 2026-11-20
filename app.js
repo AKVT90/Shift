@@ -408,18 +408,65 @@
     try { if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file] }); return; } } catch (e) { if (e.name === 'AbortError') return; }
     const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = 'shift.ics'; document.body.appendChild(a); a.click(); a.remove();
   }
-  const subUrl = () => { const w = S.settings.worker; return w.url && w.token ? `${w.url.replace(/\/$/, '')}/cal/${w.token}.ics` : ''; };
-  async function syncNow(silent) {
-    const w = S.settings.worker, u = subUrl();
-    if (!u || !w.secret) { if (!silent) toast('Define o URL, o token e a palavra-passe do serviço.'); return false; }
-    S.icsSeq++; save();
-    try {
-      const r = await fetch(u, { method: 'PUT', headers: { Authorization: 'Bearer ' + w.secret, 'Content-Type': 'text/calendar' }, body: icsText() });
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      if (!silent) toast('Calendário publicado.'); return true;
-    } catch (e) { toast('Falhou a sincronização: ' + e.message); return false; }
+  const TOKEN_RE = /^[A-Za-z0-9_-]{32,128}$/;
+  function workerBase(raw) {
+    let u = String(raw || '').trim();
+    if (!u) return { error: 'O URL do serviço está vazio.' };
+    if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(u)) u = 'https://' + u;
+    let p;
+    try { p = new URL(u); } catch (e) { return { error: `URL do serviço inválido: «${raw}».` }; }
+    if (p.protocol !== 'https:' && !(p.protocol === 'http:' && /^(localhost|127\.0\.0\.1)$/.test(p.hostname))) return { error: 'O URL do serviço tem de começar por https://.' };
+    return { base: p.origin };
   }
-  function autoSync() { if (subUrl() && S.settings.worker.secret) syncNow(true); }
+  // Endereço público do calendário (não precisa da palavra-passe).
+  function calTarget() {
+    const w = S.settings.worker, b = workerBase(w.url);
+    if (b.error) return { error: b.error };
+    const tok = String(w.token || '').trim();
+    if (!TOKEN_RE.test(tok)) return { error: `Token inválido (${tok.length} caracteres). Tem de ter entre 32 e 128 caracteres, só letras, números, «-» e «_». Carrega em «Gerar».` };
+    return { base: b.base, url: `${b.base}/cal/${tok}.ics` };
+  }
+  // Endereço + credenciais para publicar.
+  function syncTarget() {
+    const t = calTarget(); if (t.error) return t;
+    const sec = S.settings.worker.secret || '';
+    if (!sec) return { error: 'Falta a palavra-passe de publicação.' };
+    const bad = [...sec].find(c => c < ' ' || c > '~');
+    if (bad) return { error: `A palavra-passe tem um carácter não permitido («${bad}», U+${bad.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')}), provavelmente aspas ou travessão «inteligentes» do teclado. Usa só caracteres ASCII simples.` };
+    return Object.assign(t, { secret: sec });
+  }
+  const subUrl = () => calTarget().url || '';
+  let lastSync = '';
+  async function syncNow(silent) {
+    const fail = (msg, extra) => { lastSync = '✗ ' + msg; toast(silent ? 'Calendário não publicado: ' + msg.slice(0, 90) : msg.slice(0, 120)); console.error('SHIFT sync:', msg, extra || ''); return false; };
+    const t = syncTarget();
+    if (t.error) return fail(t.error);
+    const text = icsText();
+    S.icsSeq++; save();
+    const head = `PUT ${t.url}\nOrigem da app: ${location.origin}\n`;
+    let r;
+    try {
+      r = await fetch(t.url, { method: 'PUT', headers: { Authorization: 'Bearer ' + t.secret, 'Content-Type': 'text/calendar' }, body: text });
+    } catch (e) {
+      let reach = false;
+      try { await fetch(t.base + '/', { mode: 'no-cors', cache: 'no-store' }); reach = true; } catch (e2) { /* sem rede */ }
+      const why = reach
+        ? `O Worker está acessível, mas o navegador bloqueou a resposta ao PUT (CORS) — o Worker devolveu um erro sem cabeçalhos CORS (ex.: 404 por caminho/token inválido ou erro interno) ou ALLOWED_ORIGIN não coincide com ${location.origin}. Atualiza o Worker com «wrangler deploy» para ver o código HTTP real.`
+        : `Não consegui contactar ${t.base}: sem Internet, endereço/DNS errado, ou bloqueado por VPN/bloqueador de anúncios.`;
+      return fail(head + `Erro de rede (${e.name}: ${e.message}).\n` + why, e);
+    }
+    const body = (await r.text().catch(() => '')).slice(0, 200);
+    if (r.ok) {
+      const n = (text.match(/BEGIN:VEVENT/g) || []).length;
+      lastSync = `✓ Publicado — HTTP ${r.status}, ${n} turno(s), ${new Date().toLocaleTimeString('pt-PT')}.`;
+      if (!silent) toast('Calendário publicado.');
+      return true;
+    }
+    const hints = { 400: 'O Worker recusou o calendário (não começa por BEGIN:VCALENDAR ou excede 1 MB).', 401: 'Palavra-passe errada: não coincide com o secret SECRET do Worker.', 404: 'O Worker não aceitou o caminho: o token tem de ter 32–128 caracteres [A-Za-z0-9_-].', 405: 'Método não permitido pelo Worker.' };
+    const hint = hints[r.status] || (r.status >= 500 ? 'Erro interno do Worker (verifica o binding CAL e os logs: npx wrangler tail).' : '');
+    return fail(head + `HTTP ${r.status}${r.statusText ? ' ' + r.statusText : ''}. ${hint}${body ? '\nResposta: «' + body + '»' : ''}`);
+  }
+  function autoSync() { if (S.settings.worker.url) syncNow(true); }
 
   /* ---------- Definições ---------- */
   function openSettings() {
@@ -436,7 +483,8 @@
       <label class="f">Token do calendário (fica sempre igual)</label><div class="row"><input id="wT" value="${esc(w.token)}"><button class="btn sec small" id="wG">Gerar</button></div>
       <label class="f">Palavra-passe de publicação</label><input id="wP" type="password" value="${esc(w.secret)}">
       <div class="code" id="wUrl">${esc(subUrl().replace(/^https?:/, 'webcal:') || '—')}</div>
-      <button class="btn sec" id="wSync">Publicar agora</button></div>
+      <button class="btn sec" id="wSync">Publicar agora</button>
+      <div class="code" id="wLog" style="white-space:pre-wrap" ${lastSync ? '' : 'hidden'}>${esc(lastSync)}</div></div>
       <h3>Dados</h3><div class="stack"><button class="btn sec" id="dEx">Exportar cópia de segurança</button><button class="btn sec" id="dIm">Importar cópia de segurança</button><input id="dF" type="file" accept="application/json" hidden><button class="btn danger" id="dDel">Apagar todos os dados</button></div>
       <button class="btn" id="sSave" style="margin-top:16px">Guardar definições</button>`, (el, close) => {
       const g = id => el.querySelector(id);
@@ -444,13 +492,13 @@
         s.start = g('#sS').value || s.start; s.end = g('#sE').value || s.end;
         s.alarms = { forStart: g('#aF').value || s.alarms.forStart, first: g('#a1').value || s.alarms.first, last: g('#a2').value || s.alarms.last, step: Math.max(1, +g('#aS').value || 5) };
         s.shortcutName = g('#aN').value.trim() || 'SHIFT Alarmes';
-        w.url = g('#wU').value.trim(); w.token = g('#wT').value.trim(); w.secret = g('#wP').value;
+        { const raw = g('#wU').value.trim(), nb = workerBase(raw); w.url = nb.base || raw; g('#wU').value = w.url; } w.token = g('#wT').value.trim(); w.secret = g('#wP').value;
         save();
       };
       g('#wG').onclick = () => { const a = new Uint8Array(24); crypto.getRandomValues(a); g('#wT').value = [...a].map(b => b.toString(16).padStart(2, '0')).join(''); };
       g('#sSave').onclick = () => { read(); close(); render(); toast('Definições guardadas.'); };
       g('#bIcs').onclick = exportIcs;
-      g('#wSync').onclick = async () => { read(); await syncNow(false); g('#wUrl').textContent = subUrl().replace(/^https?:/, 'webcal:') || '—'; };
+      g('#wSync').onclick = async () => { read(); const btn = g('#wSync'); btn.disabled = true; btn.textContent = 'A publicar…'; try { await syncNow(false); } finally { btn.disabled = false; btn.textContent = 'Publicar agora'; } g('#wUrl').textContent = subUrl().replace(/^https?:/, 'webcal:') || '—'; const lg = g('#wLog'); lg.textContent = lastSync; lg.hidden = !lastSync; };
       g('#dEx').onclick = () => { const f = new File([JSON.stringify(S)], `shift-backup-${todayKey()}.json`, { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(f); a.download = f.name; a.click(); };
       g('#dIm').onclick = () => g('#dF').click();
       g('#dF').onchange = async e => {

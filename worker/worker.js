@@ -27,10 +27,21 @@ async function safeEqual(a, b) {
 export default {
   async fetch(req, env) {
     const C = cors(env);
+    try {
+      return await handle(req, env, C);
+    } catch (e) {
+      // Devolve sempre CORS, senão o navegador esconde o erro real atrás de «Failed to fetch».
+      return new Response('Worker error: ' + (e && e.message ? e.message : e), { status: 500, headers: C });
+    }
+  }
+};
+
+async function handle(req, env, C) {
+  {
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: C });
 
     const m = /^\/cal\/([A-Za-z0-9_-]{32,128})\.ics$/.exec(new URL(req.url).pathname);
-    if (!m) return new Response('Not found', { status: 404 });
+    if (!m) return new Response('Not found (caminho ou token inválido)', { status: 404, headers: C });
     const key = 'ics:' + m[1];
 
     if (req.method === 'PUT') {
@@ -48,11 +59,11 @@ export default {
 
     if (req.method === 'GET' || req.method === 'HEAD') {
       const v = await env.CAL.get(key);
-      if (v === null) return new Response('Not found', { status: 404 });
+      if (v === null) return new Response('Not found', { status: 404, headers: C });
       return new Response(req.method === 'HEAD' ? null : v, {
-        headers: { 'Content-Type': 'text/calendar; charset=utf-8', 'Cache-Control': 'no-store' }
+        headers: Object.assign({ 'Content-Type': 'text/calendar; charset=utf-8', 'Cache-Control': 'no-store' }, C)
       });
     }
     return new Response('Method not allowed', { status: 405, headers: C });
   }
-};
+}
