@@ -16,8 +16,8 @@ Web app (PWA) para iPhone: importa screenshots do calendário do Continente, rec
 ## Calendário Apple
 - **Exportar .ics** (Definições): abre no Calendário. Cada dia tem UID fixo, por isso voltar a importar atualiza em vez de duplicar.
 - **URL permanente (subscrição)**: o GitHub Pages é estático e não consegue gerar um calendário dinâmico. Para isso há `worker/` (Cloudflare Workers + KV, gratuito):
-  1. `npm i -g wrangler`, `wrangler kv namespace create CAL`, cola o `id` em `worker/wrangler.toml`.
-  2. `wrangler secret put SECRET` (a tua palavra-passe) e `wrangler deploy`.
+  1. Na pasta `worker/`: `npx wrangler login` e depois `npx wrangler deploy` (mostra o URL `https://shift-calendar.<conta>.workers.dev`). O `wrangler.toml` já tem o binding `CAL` com o teu namespace.
+  2. `npx wrangler secret put SECRET` (escreve a tua palavra-passe).
   3. Na app → Definições: URL do worker, **Gerar** token, palavra-passe → *Publicar agora*.
   4. No iPhone: Definições → Calendário → Contas → Adicionar conta → Outra → Adicionar calendário subscrito → cola o `webcal://…` mostrado na app.
   O URL não muda. A app republica sozinha depois de cada alteração; o iPhone é que decide quando refresca (normalmente em horas).

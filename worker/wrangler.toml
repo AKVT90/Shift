@@ -1,7 +1,12 @@
-name = "shift-cal"
+name = "shift-calendar"
 main = "worker.js"
 compatibility_date = "2024-11-01"
 
+# Opcional: restringe quem pode publicar a partir de um navegador.
+# Coloca aqui a origem da tua app, sem barra final e sem caminho.
+# [vars]
+# ALLOWED_ORIGIN = "https://O-TEU-UTILIZADOR.github.io"
+
 [[kv_namespaces]]
 binding = "CAL"
-id = "COLOCA_AQUI_O_ID_DO_KV"
+id = "989f406b6fd44cd7a692a2e00c908cc5"

@@ -1,24 +1,58 @@
-// Cloudflare Worker: guarda o .ics publicado pela app SHIFT e serve-o num URL permanente.
-// Variáveis: SECRET (palavra-passe de publicação), KV namespace "CAL".
-const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,PUT,OPTIONS', 'Access-Control-Allow-Headers': 'Authorization,Content-Type' };
+// SHIFT — Cloudflare Worker
+// GET  /cal/<token>.ics  -> devolve o calendário (URL permanente, token difícil de adivinhar)
+// PUT  /cal/<token>.ics  -> publica/atualiza o calendário (exige Authorization: Bearer <SECRET>)
+// Bindings: KV "CAL"; secret "SECRET"; variável opcional ALLOWED_ORIGIN.
+
+const enc = new TextEncoder();
+
+function cors(env) {
+  return {
+    'Access-Control-Allow-Origin': env.ALLOWED_ORIGIN || '*',
+    'Access-Control-Allow-Methods': 'GET,HEAD,PUT,OPTIONS',
+    'Access-Control-Allow-Headers': 'Authorization,Content-Type',
+    'Access-Control-Max-Age': '86400',
+    'Vary': 'Origin'
+  };
+}
+
+// Comparação em tempo constante (via hash) para não revelar a palavra-passe por tempo de resposta.
+async function safeEqual(a, b) {
+  const [ha, hb] = await Promise.all([crypto.subtle.digest('SHA-256', enc.encode(a)), crypto.subtle.digest('SHA-256', enc.encode(b))]);
+  const x = new Uint8Array(ha), y = new Uint8Array(hb);
+  let d = 0;
+  for (let i = 0; i < x.length; i++) d |= x[i] ^ y[i];
+  return d === 0;
+}
+
 export default {
   async fetch(req, env) {
-    if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
-    const m = /^\/cal\/([A-Za-z0-9_-]{32,})\.ics$/.exec(new URL(req.url).pathname);
+    const C = cors(env);
+    if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: C });
+
+    const m = /^\/cal\/([A-Za-z0-9_-]{32,128})\.ics$/.exec(new URL(req.url).pathname);
     if (!m) return new Response('Not found', { status: 404 });
     const key = 'ics:' + m[1];
+
     if (req.method === 'PUT') {
-      if (!env.SECRET || req.headers.get('Authorization') !== 'Bearer ' + env.SECRET) return new Response('Unauthorized', { status: 401, headers: CORS });
+      const auth = req.headers.get('Authorization') || '';
+      if (!env.SECRET || !(await safeEqual(auth, 'Bearer ' + env.SECRET))) {
+        return new Response('Unauthorized', { status: 401, headers: C });
+      }
       const body = await req.text();
-      if (!body.startsWith('BEGIN:VCALENDAR') || body.length > 1_000_000) return new Response('Bad calendar', { status: 400, headers: CORS });
+      if (!body.startsWith('BEGIN:VCALENDAR') || body.length > 1_000_000) {
+        return new Response('Bad calendar', { status: 400, headers: C });
+      }
       await env.CAL.put(key, body);
-      return new Response('ok', { headers: CORS });
+      return new Response('ok', { status: 200, headers: C });
     }
-    if (req.method === 'GET') {
+
+    if (req.method === 'GET' || req.method === 'HEAD') {
       const v = await env.CAL.get(key);
-      if (!v) return new Response('Not found', { status: 404 });
-      return new Response(v, { headers: { 'Content-Type': 'text/calendar; charset=utf-8', 'Cache-Control': 'no-store' } });
+      if (v === null) return new Response('Not found', { status: 404 });
+      return new Response(req.method === 'HEAD' ? null : v, {
+        headers: { 'Content-Type': 'text/calendar; charset=utf-8', 'Cache-Control': 'no-store' }
+      });
     }
-    return new Response('Method not allowed', { status: 405 });
+    return new Response('Method not allowed', { status: 405, headers: C });
   }
 };
