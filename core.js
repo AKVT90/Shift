@@ -96,6 +96,30 @@
     return best;
   }
 
+
+  /* ---------- Pré-processamento para OCR ----------
+     Números dentro de círculos coloridos (claro sobre escuro ou escuro sobre claro) confundem o OCR.
+     Devolve uma imagem preto/branco em que só ficam a preto os pixels que diferem da média local. */
+  function ocrPrep(img, thr) {
+    const w = img.width, h = img.height, d = img.data;
+    const rad = Math.max(8, Math.round(w * 0.01)), W1 = w + 1;
+    const g = new Uint8Array(w * h);
+    for (let i = 0; i < w * h; i++) g[i] = (299 * d[i * 4] + 587 * d[i * 4 + 1] + 114 * d[i * 4 + 2]) / 1000;
+    const I = new Int32Array(W1 * (h + 1));
+    for (let y = 0; y < h; y++) { let row = 0; for (let x = 0; x < w; x++) { row += g[y * w + x]; I[(y + 1) * W1 + x + 1] = I[y * W1 + x + 1] + row; } }
+    const out = new Uint8ClampedArray(w * h * 4);
+    for (let y = 0; y < h; y++) {
+      const y0 = Math.max(0, y - rad), y1 = Math.min(h, y + rad + 1);
+      for (let x = 0; x < w; x++) {
+        const x0 = Math.max(0, x - rad), x1 = Math.min(w, x + rad + 1);
+        const m = (I[y1 * W1 + x1] - I[y0 * W1 + x1] - I[y1 * W1 + x0] + I[y0 * W1 + x0]) / ((x1 - x0) * (y1 - y0));
+        const v = Math.abs(g[y * w + x] - m) > thr ? 0 : 255, o = (y * w + x) * 4;
+        out[o] = out[o + 1] = out[o + 2] = v; out[o + 3] = 255;
+      }
+    }
+    return { width: w, height: h, data: out };
+  }
+
   /* ---------- Grelha ---------- */
   function candidatesFromWords(words) {
     const out = [];
@@ -354,7 +378,7 @@
 
   return {
     TYPES, OFF_TYPES, DEFAULT_REFS, pad, dateKey, median, dE,
-    candidatesFromWords, fitGrid, analyse, parseMonthYear, mkIncoming, diffMonth, sameDay, applyChange,
+    candidatesFromWords, fitGrid, ocrPrep, analyse, parseMonthYear, mkIncoming, diffMonth, sameDay, applyChange,
     sequence, alarmTimes, activeAlarmTimes, buildICS, toMin
   };
 });

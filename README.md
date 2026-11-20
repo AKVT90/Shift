@@ -1,36 +1,37 @@
 # SHIFT — Personal Work Schedule
 
-Web app (PWA) para iPhone: importa screenshots do calendário do Continente, reconhece dias/cores/trocas, deixa-te corrigir e guardar, e exporta para o Calendário Apple. Tudo corre no teu iPhone; os dados ficam guardados localmente (funciona offline depois da primeira abertura).
+Web app (PWA) pensada para uso diário **no iPhone**: importa screenshots do calendário do Continente, reconhece dias/cores/trocas, deixa-te corrigir, guarda tudo no telemóvel e publica um calendário Apple com URL permanente (Cloudflare Worker).
 
-## Pôr online (GitHub Pages)
-1. Cria um repositório no GitHub e carrega **todos** os ficheiros desta pasta (exceto `test/` e `worker/`, que são opcionais).
-2. *Settings → Pages → Deploy from a branch → `main` / `(root)`*.
-3. No iPhone, abre `https://O-TEU-UTILIZADOR.github.io/NOME-DO-REPO/` no **Safari** → Partilhar → **Adicionar ao Ecrã Principal**.
+## Publicar uma nova versão no GitHub Pages (a partir do Mac)
+1. Substitui os ficheiros do repositório pelos desta pasta (inclui a pasta `vendor/`, o OCR, ~9 MB — tem de ir para o GitHub).
+2. **Sobe a versão** em `version.js` (ex.: `2026.11.21-1`). É isto que faz o iPhone instalar a atualização.
+3. `git add -A && git commit -m "SHIFT 2026.11.21-1" && git push` (ou arrasta os ficheiros para o repositório no site do GitHub).
+4. Espera 1–2 min pelo Pages. No iPhone abre a app: aparece **«Nova versão disponível → Atualizar»**. Também podes ir a Definições → *Procurar atualizações*.
+   - Os dados **não** são tocados por atualizações: vivem no armazenamento da app, não nos ficheiros.
+   - A app vai sempre à rede primeiro (com cache só offline) e o service worker ignora a cache HTTP do GitHub Pages, por isso não fica presa numa versão antiga.
 
-## Como usar
-- **Importar**: escolhe um ou mais screenshots → confere a leitura (dias com **?** estão em dúvida; toca para corrigir) → Continuar → vês o resumo de diferenças → Guardar.
-- Importar o mesmo mês outra vez compara com o que existe; dias editados à mão **não** são substituídos a menos que os marques.
-- **Histórico**: cada importação guarda o estado anterior do mês e podes restaurá-lo.
-- **Calibrar cores**: as cores de referência são estimativas. Se o primeiro mês sair errado, corrige os dias no preview e carrega em *Calibrar cores com as minhas correções*; guardam-se nas definições.
+## Instalar no iPhone
+Safari → abre o endereço do Pages → Partilhar → **Adicionar ao Ecrã Principal**.
+⚠ No iOS a app instalada tem armazenamento **separado** do Safari. Se já usaste a SHIFT no Safari: Definições → *Guardar cópia de segurança*, instala, e na app instalada *Restaurar de um ficheiro*.
 
-## Calendário Apple
-- **Exportar .ics** (Definições): abre no Calendário. Cada dia tem UID fixo, por isso voltar a importar atualiza em vez de duplicar.
-- **URL permanente (subscrição)**: o GitHub Pages é estático e não consegue gerar um calendário dinâmico. Para isso há `worker/` (Cloudflare Workers + KV, gratuito):
-  1. Na pasta `worker/`: `npx wrangler login` e depois `npx wrangler deploy` (mostra o URL `https://shift-calendar.<conta>.workers.dev`). O `wrangler.toml` já tem o binding `CAL` com o teu namespace.
-  2. `npx wrangler secret put SECRET` (escreve a tua palavra-passe).
-  3. Na app → Definições: URL do worker, **Gerar** token, palavra-passe → *Publicar agora*.
-  4. No iPhone: Definições → Calendário → Contas → Adicionar conta → Outra → Adicionar calendário subscrito → cola o `webcal://…` mostrado na app.
-  O URL não muda. A app republica sozinha depois de cada alteração; o iPhone é que decide quando refresca (normalmente em horas).
+## Importar horários
+Importar → *Escolher screenshots* (abre a biblioteca de Fotografias; podes escolher vários, de meses diferentes). O OCR corre no próprio iPhone com ficheiros alojados no repositório (`vendor/tesseract`), sem enviar imagens para lado nenhum e **sem depender de CDN**; na primeira utilização os ficheiros ficam em cache e passam a funcionar offline. Confere o preview (dias com **?** estão em dúvida), *Continuar*, vê as diferenças e guarda. Uma imagem inválida não cancela as restantes.
+
+## Dados e cópias de segurança
+- Tudo é gravado logo a cada alteração (localStorage) e espelhado em IndexedDB, com **cópias automáticas** diárias (7 dias) e uma cópia antes de cada restauro. Se os dados desaparecerem, a app oferece restaurar ao abrir; se o JSON ficar ilegível, o original é preservado.
+- Definições → Dados: guardar cópia (partilha para Ficheiros/AirDrop), restaurar de ficheiro, ver/restaurar cópias automáticas. A app avisa se passarem 14 dias sem cópia.
+- A cópia inclui horários, histórico, URL e token do calendário (para o URL de subscrição não mudar), **mas não a palavra-passe do Worker**.
+
+## Calendário Apple (Cloudflare Worker)
+O Worker (`worker/`) já está configurado com o binding `CAL`. Na app: Definições → URL do Worker, token (*Gerar*), palavra-passe → *Publicar agora*. Depois, cada alteração (editar um dia, importar, restaurar) volta a publicar automaticamente; se falhar (sem rede), fica **«por publicar»** e repete ao reabrir a app ou quando volta a rede. Os eventos têm UID fixo por dia: atualizam-se sem duplicar e os turnos removidos desaparecem. O iPhone é que decide quando refresca um calendário subscrito (normalmente em horas).
 
 ## Despertadores — limitação real
-Uma web app **não pode** criar alarmes no iPhone (o AlarmKit só existe em apps nativas Swift). A alternativa que funciona: um **Atalho** do iOS.
-1. App Atalhos → novo atalho chamado **SHIFT Alarmes** (ou o nome definido nas Definições).
-2. Ações: *Receber Texto como entrada* → *Dividir Texto* (Novas linhas) → *Repetir com cada item* → dentro: *Obter datas da entrada* (item) → *Criar alarme* (hora = a data obtida).
-3. Em *Despertadores*, o botão **Criar no iPhone** abre o Atalho com as horas do dia. A app não consegue saber se o Atalho correu: avisa antes de reenviar para evitar duplicados.
-Cria os alarmes de um turno de cada vez; o Atalho não cancela alarmes antigos (apaga-os no Relógio se o turno mudar).
+Uma web app **não pode criar alarmes no iPhone**. A SHIFT prepara as horas e entrega-as ao Atalho **SHIFT Alarms**, que cria os alarmes no Relógio. Os passos para criar o Atalho estão dentro da app (Despertadores → *Como configurar o Atalho*). Alarmes criados pelo Atalho tocam na **próxima** ocorrência de cada hora: envia na véspera do turno ou na manhã do dia; a app avisa quando o dia não coincide. A sequência padrão (07:20…08:00, de 5 em 5 min, 9 alarmes) pode ser enviada em *Sequência padrão*.
 
-## OCR
-Usa Tesseract.js (carregado da CDN na primeira importação, precisa de Internet). A deteção de grelha, cores e contornos tracejados é feita por código próprio (`core.js`), não por IA, e baseia-se na posição de cada dia. Nada é guardado sem confirmação.
+## Segurança
+- Nenhuma palavra-passe nem segredo está no código. A palavra-passe de publicação é guardada só neste iPhone (chave própria, fora dos dados e das cópias) e no Cloudflare (`wrangler secret put SECRET`).
+- O token do calendário é a «chave» do URL de leitura: quem o tiver lê o calendário. Não o partilhes.
+- `.gitignore` exclui `.dev.vars`, `.wrangler/` e `node_modules/`.
 
-## Testes
-`node test/core.test.js`, `node test/ui.test.js`, `node test/worker.test.mjs` (precisam de `pngjs` e `jsdom`; `python3 test/gen.py` gera o screenshot sintético).
+## Testes (Mac)
+`npm i pngjs jsdom playwright` e depois `node test/core.test.js`, `node test/ui.test.js`, `node test/worker.test.mjs`, `node test/e2e.js` (Chromium com perfil iPhone: OCR real, persistência, recuperação, fila de publicação, atualizações). `python3 test/gen.py` gera o screenshot sintético.

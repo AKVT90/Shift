@@ -10,6 +10,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="SHIFT">
+<meta name="format-detection" content="telephone=no">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="icon" href="icon-192.png">
@@ -29,8 +30,10 @@
   <button data-tab="alarmes"><svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2M4 5l3-2M20 5l-3-2"/></svg><span>Despertadores</span></button>
   <button data-tab="historico"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></svg><span>Histórico</span></button>
 </nav>
+<div id="upd" class="upd" hidden><span>Nova versão da SHIFT disponível.</span><button id="updGo" class="btn small">Atualizar</button></div>
 <div id="sheetRoot"></div>
 <div id="toast" role="status"></div>
+<script src="version.js"></script>
 <script src="core.js"></script>
 <script src="app.js"></script>
 </body>
