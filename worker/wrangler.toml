@@ -1,0 +1,7 @@
+name = "shift-cal"
+main = "worker.js"
+compatibility_date = "2024-11-01"
+
+[[kv_namespaces]]
+binding = "CAL"
+id = "COLOCA_AQUI_O_ID_DO_KV"
